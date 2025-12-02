@@ -1,11 +1,13 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 import os
 import io
 
 # --- 配置 ---
-DATA_FILE = 'signup_data.csv'  # 本地数据保存文件名
+DATA_FILE = 'signup_data.csv'   # 本地 CSV 文件名
+EXCEL_FILE = 'signup_data.xlsx' # 本地 Excel 文件名
+ADMIN_PASSWORD = "123456"       # 管理员密码（你可以自己改）
 
 
 # --- 时间窗口相关函数 ---
@@ -82,34 +84,64 @@ def get_next_signup_start(now=None):
 
 
 # --- 数据相关函数 ---
-def load_data():
-    """读取已有的报名数据"""
-    if os.path.exists(DATA_FILE):
-        return pd.read_csv(DATA_FILE)
+def ensure_id_column(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    保证数据里有 ID 字段：
+    - 如果没有 ID，就自动从 1 开始编号
+    - 如果有 ID，就保持不变
+    """
+    if "ID" not in df.columns:
+        # 新增 ID 列放在最前面
+        df = df.copy()
+        df.insert(0, "ID", range(1, len(df) + 1))
     else:
-        return pd.DataFrame(columns=["提交时间", "游戏名字", "大本营等级", "是否接受补位"])
-
-
-def save_data(entry_dict):
-    """
-    保存新数据到本地：
-    - signup_data.csv
-    - signup_data.xlsx（Excel）
-    """
-    df = load_data()
-    new_df = pd.DataFrame([entry_dict])
-    df = pd.concat([df, new_df], ignore_index=True)
-
-    # 保存为 CSV
-    df.to_csv(DATA_FILE, index=False, encoding='utf-8-sig')
-
-    # 额外保存一份 Excel
-    df.to_excel("signup_data.xlsx", index=False)
-
+        # 确保 ID 是整数
+        df["ID"] = pd.to_numeric(df["ID"], errors="coerce").fillna(0).astype(int)
     return df
 
 
-def create_entry(name, townhall, fill_status):
+def load_data() -> pd.DataFrame:
+    """读取已有的报名数据，并保证有 ID 列"""
+    if os.path.exists(DATA_FILE):
+        df = pd.read_csv(DATA_FILE)
+        df = ensure_id_column(df)
+        # 同步回文件，避免旧数据没有 ID
+        save_full_data(df)
+        return df
+    else:
+        df = pd.DataFrame(columns=["ID", "提交时间", "游戏名字", "大本营等级", "是否接受补位"])
+        return df
+
+
+def save_full_data(df: pd.DataFrame):
+    """将整张表一次性写回 CSV 和 Excel"""
+    df = ensure_id_column(df)
+    df.to_csv(DATA_FILE, index=False, encoding='utf-8-sig')
+    df.to_excel(EXCEL_FILE, index=False)
+
+
+def add_entry(entry_dict: dict) -> pd.DataFrame:
+    """新增一条报名记录（增）"""
+    df = load_data()
+    df = ensure_id_column(df)
+
+    if df.empty:
+        next_id = 1
+    else:
+        next_id = df["ID"].max() + 1
+
+    entry_with_id = {
+        "ID": next_id,
+        **entry_dict
+    }
+
+    new_df = pd.DataFrame([entry_with_id])
+    df = pd.concat([df, new_df], ignore_index=True)
+    save_full_data(df)
+    return df
+
+
+def create_entry(name, townhall, fill_status) -> dict:
     """构造一个报名记录字典，便于复用"""
     return {
         "提交时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -122,7 +154,7 @@ def create_entry(name, townhall, fill_status):
 # --- 网页界面设计 ---
 st.set_page_config(page_title="联赛报名系统", page_icon="⚔️")
 
-st.title("🛡️ 联赛报名系统")
+st.title("🛡️ 联赛报名系统（增删改查版）")
 st.markdown("---")
 
 now = datetime.now()
@@ -149,7 +181,7 @@ if is_signup_open():
         f"⏳ 距离截止还剩：**{days} 天 {hours} 小时 {minutes} 分钟**"
     )
 
-    # 2. 报名表单
+    # 2. 报名表单（增）
     with st.form("signup_form"):
         st.subheader("📝 请填写报名信息")
 
@@ -183,7 +215,7 @@ if is_signup_open():
                     st.error("❌ 本轮报名中已存在相同的游戏名字，请勿重复提交。")
                 else:
                     entry = create_entry(name, townhall, fill_status)
-                    df_new = save_data(entry)
+                    df_new = add_entry(entry)
 
                     st.balloons()
                     st.success(f"✅ {name}，报名成功！已记录。")
@@ -197,12 +229,12 @@ else:
         f"⏳ 距离下次报名还有：**{days_to_next} 天左右**"
     )
 
-# --- 管理员/查看区域 (通常放在页面底部) ---
+# --- 管理员/查看区域 (查 / 改 / 删) ---
 st.markdown("---")
-with st.expander("📊 查看已报名名单 (点击展开)"):
+with st.expander("📊 查看 / 管理已报名名单 (点击展开)"):
     df = load_data()
     if not df.empty:
-        # 筛选和搜索
+        # 筛选和搜索（查）
         st.subheader("筛选 / 搜索")
 
         # 按大本营等级筛选
@@ -262,5 +294,80 @@ with st.expander("📊 查看已报名名单 (点击展开)"):
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key='download-excel'
         )
+
+        st.markdown("---")
+        st.subheader("管理员操作（修改 / 删除）")
+
+        # 管理员验证
+        pwd = st.text_input("输入管理员密码以进行编辑（默认 123456，可在代码开头修改）", type="password")
+        if pwd == ADMIN_PASSWORD:
+            st.success("✅ 管理员验证通过，可进行编辑操作。")
+
+            if not df_display.empty:
+                # 选择要编辑的 ID
+                id_options = df_display["ID"].tolist()
+                selected_id = st.selectbox("选择要修改 / 删除的报名 ID", id_options)
+
+                row = df_display[df_display["ID"] == selected_id].iloc[0]
+
+                with st.form("edit_delete_form"):
+                    st.write(f"当前编辑的记录 ID：**{selected_id}**")
+
+                    edit_name = st.text_input("游戏名字（修改）", value=row["游戏名字"])
+
+                    townhall_options = ["18本", "17本", "16本", "16本以下"]
+                    if row["大本营等级"] in townhall_options:
+                        th_index = townhall_options.index(row["大本营等级"])
+                    else:
+                        th_index = 0
+                    edit_townhall = st.selectbox(
+                        "大本营等级（修改）",
+                        townhall_options,
+                        index=th_index
+                    )
+
+                    fill_options = ["补位 (服从安排)", "不补位 (必须首发)"]
+                    if row["是否接受补位"] in fill_options:
+                        fill_index = fill_options.index(row["是否接受补位"])
+                    else:
+                        fill_index = 0
+                    edit_fill = st.radio(
+                        "是否接受补位（修改）",
+                        fill_options,
+                        index=fill_index
+                    )
+
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        save_btn = st.form_submit_button("💾 保存修改")
+                    with col2:
+                        delete_btn = st.form_submit_button("🗑 删除该报名")
+
+                # 重新从全量数据操作，避免只在筛选结果上改
+                if save_btn or delete_btn:
+                    full_df = load_data()
+                    full_df = ensure_id_column(full_df)
+
+                    if selected_id not in full_df["ID"].values:
+                        st.error("未在全量数据中找到该 ID，可能数据已更新，请刷新页面。")
+                    else:
+                        if save_btn:
+                            # 修改
+                            idx = full_df[full_df["ID"] == selected_id].index[0]
+                            full_df.at[idx, "游戏名字"] = edit_name
+                            full_df.at[idx, "大本营等级"] = edit_townhall
+                            full_df.at[idx, "是否接受补位"] = edit_fill
+                            save_full_data(full_df)
+                            st.success("✅ 修改已保存。请刷新页面查看最新数据。")
+                            st.experimental_rerun()
+
+                        if delete_btn:
+                            # 删除
+                            full_df = full_df[full_df["ID"] != selected_id]
+                            save_full_data(full_df)
+                            st.success("🗑 已删除该报名记录。")
+                            st.experimental_rerun()
+        elif pwd:
+            st.error("❌ 管理员密码错误。")
     else:
         st.write("暂无报名数据。")
