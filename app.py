@@ -7,7 +7,7 @@ import io
 # --- 配置 ---
 DATA_FILE = 'signup_data.csv'   # 本地 CSV 文件名
 EXCEL_FILE = 'signup_data.xlsx' # 本地 Excel 文件名
-ADMIN_PASSWORD = "123456"       # 管理员密码（你可以自己改）
+ADMIN_PASSWORD = "52739"       # 管理员密码（你可以自己改）
 
 
 # --- 时间窗口相关函数 ---
@@ -154,7 +154,7 @@ def create_entry(name, townhall, fill_status) -> dict:
 # --- 网页界面设计 ---
 st.set_page_config(page_title="联赛报名系统", page_icon="⚔️")
 
-st.title("🛡️ 联赛报名系统（增删改查版）")
+st.title("🛡️ 联赛报名系统")
 st.markdown("---")
 
 now = datetime.now()
@@ -371,3 +371,4 @@ with st.expander("📊 查看 / 管理已报名名单 (点击展开)"):
             st.error("❌ 管理员密码错误。")
     else:
         st.write("暂无报名数据。")
+
