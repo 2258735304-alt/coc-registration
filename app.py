@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 import os
+import io
 
 # --- 配置 ---
 DATA_FILE = 'signup_data.csv'  # 本地数据保存文件名
@@ -89,50 +90,23 @@ def load_data():
         return pd.DataFrame(columns=["提交时间", "游戏名字", "大本营等级", "是否接受补位"])
 
 
-def save_data_to_csv(entry_dict):
-    """保存新数据到本地 CSV"""
+def save_data(entry_dict):
+    """
+    保存新数据到本地：
+    - signup_data.csv
+    - signup_data.xlsx（Excel）
+    """
     df = load_data()
     new_df = pd.DataFrame([entry_dict])
     df = pd.concat([df, new_df], ignore_index=True)
+
+    # 保存为 CSV
     df.to_csv(DATA_FILE, index=False, encoding='utf-8-sig')
+
+    # 额外保存一份 Excel
+    df.to_excel("signup_data.xlsx", index=False)
+
     return df
-
-
-def append_to_google_sheets(entry_dict):
-    """
-    尝试把报名信息同步到 Google Sheets。
-    依赖：
-        - st.secrets["gcp_service_account"]：Google 服务账号 JSON
-        - st.secrets["SHEET_ID"]：你的表格 ID
-    如果未配置或出错，会给出提示，但不会影响程序正常运行。
-    """
-    try:
-        import gspread
-        from google.oauth2.service_account import Credentials
-
-        # 从 Streamlit Secrets 中获取配置
-        service_account_info = st.secrets["gcp_service_account"]
-        sheet_id = st.secrets["SHEET_ID"]
-
-        scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-        creds = Credentials.from_service_account_info(
-            service_account_info,
-            scopes=scopes
-        )
-        client = gspread.authorize(creds)
-        sheet = client.open_by_key(sheet_id).sheet1  # 默认第一个工作表
-
-        # 按列顺序存
-        row = [
-            entry_dict["提交时间"],
-            entry_dict["游戏名字"],
-            entry_dict["大本营等级"],
-            entry_dict["是否接受补位"],
-        ]
-        sheet.append_row(row)
-    except Exception as e:
-        # 不中断主流程，只给提示
-        st.warning(f"⚠️ 已保存到本地，但同步到 Google 表格时出现问题：{e}")
 
 
 def create_entry(name, townhall, fill_status):
@@ -209,10 +183,7 @@ if is_signup_open():
                     st.error("❌ 本轮报名中已存在相同的游戏名字，请勿重复提交。")
                 else:
                     entry = create_entry(name, townhall, fill_status)
-                    df_new = save_data_to_csv(entry)
-
-                    # 尝试同步到 Google Sheets（如果你配置了 st.secrets）
-                    append_to_google_sheets(entry)
+                    df_new = save_data(entry)
 
                     st.balloons()
                     st.success(f"✅ {name}，报名成功！已记录。")
@@ -269,7 +240,7 @@ with st.expander("📊 查看已报名名单 (点击展开)"):
         st.dataframe(df_display)
         st.caption(f"当前总报名人数: {len(df)} 人（筛选后显示 {len(df_display)} 人）")
 
-        # 提供下载按钮（使用筛选后的数据导出）
+        # 下载 CSV
         csv = df_display.to_csv(index=False).encode('utf-8-sig')
         st.download_button(
             "📥 下载当前筛选结果 (CSV)",
@@ -277,6 +248,19 @@ with st.expander("📊 查看已报名名单 (点击展开)"):
             "signup_list_filtered.csv",
             "text/csv",
             key='download-csv'
+        )
+
+        # 下载 Excel
+        excel_buffer = io.BytesIO()
+        df_display.to_excel(excel_buffer, index=False)
+        excel_buffer.seek(0)
+
+        st.download_button(
+            "📥 下载当前筛选结果 (Excel)",
+            excel_buffer,
+            "signup_list_filtered.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key='download-excel'
         )
     else:
         st.write("暂无报名数据。")
