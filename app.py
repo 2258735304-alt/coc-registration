@@ -145,8 +145,13 @@ if is_signup_open():
                 st.error("请填写游戏名字")
             else:
                 df = load_data()
-                df["提交时间_dt"] = pd.to_datetime(df["提交时间"], errors="coerce")
-                mask = df["提交时间_dt"].between(current_start, current_end)
+               df["提交时间_dt"] = pd.to_datetime(
+    df["提交时间"],
+    errors="coerce"
+).dt.tz_localize("Asia/Shanghai")  # ✅ 关键：补上时区
+
+mask = df["提交时间_dt"].between(current_start, current_end)
+
                 if (df.loc[mask, "游戏名字"] == name).any():
                     st.error("本轮已报名，请勿重复提交")
                 else:
@@ -159,3 +164,4 @@ else:
         f"📌 下次开始时间：**{next_start:%Y-%m-%d %H:%M}**\n\n"
         f"⏳ 剩余时间：**{format_countdown(next_start - now)}**"
     )
+
